@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XRPL Ledger Explorer</title>
+    <script src="https://unpkg.com/xrpl@2.14.0/build/xrpl-latest-min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+        }
+        input, button {
+            padding: 10px;
+            margin: 10px;
+            font-size: 16px;
+        }
+        #ledger, #balance, #transactions {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
+            margin: 20px auto;
+            max-width: 600px;
+            text-align: left;
+        }
+        .transaction {
+            padding: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+        .transaction:last-child {
+            border-bottom: none;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>XRPL Ledger Explorer</h1>
+
+    <div id="ledger">
+        <h2>Ledger Details</h2>
+        <p><strong>Ledger Index:</strong> <span id="ledgerIndex">Loading...</span></p>
+        <p><strong>Transaction Count:</strong> <span id="txCount">Loading...</span></p>
+    </div>
+
+    <div>
+        <input type="text" id="account" placeholder="Enter XRP Account (r...)" value="rPT1Sjq2YGrBMTttX4GZHjKu9dyfzbpAYe">
+        <button onclick="getBalance()">Check Balance</button>
+    </div>
+
+    <div id="balance">
+        <h2>Account Balance</h2>
+        <p><strong>Address:</strong> <span id="accountAddress">-</span></p>
+        <p><strong>Balance:</strong> <span id="accountBalance">-</span> XRP</p>
+    </div>
+
+    <div id="transactions">
+        <h2>Recent Transactions</h2>
+        <div id="txList">Loading...</div>
+    </div>
+
+    <script>
+        let client;
+
+        async function connectXRPL() {
+            try {
+                client = new xrpl.Client('wss://xrplcluster.com');
+                await client.connect();
+                console.log("Connected to XRPL");
+
+                const ledgerResponse = await client.request({
+                    command: "ledger_current"
+                });
+                const ledgerIndex = ledgerResponse.result.ledger_current_index;
+                document.getElementById("ledgerIndex").innerText = ledgerIndex;
+
+                const ledgerData = await client.request({
+                    command: "ledger",
+                    ledger_index: "validated",
+                    transactions: true
+                });
+                document.getElementById("txCount").innerText = ledgerData.result.ledger.transactions?.length || 0;
+
+            } catch (error) {
+                console.error("Error fetching ledger info:", error);
+                document.getElementById("ledgerIndex").innerText = "Error connecting";
+                document.getElementById("txCount").innerText = "Error connecting";
+            }
+        }
+
+        async function getBalance() {
+            const account = document.getElementById("account").value.trim();
+            if (!account) {
+                alert("Please enter a valid XRPL address.");
+                return;
+            }
+
+            try {
+                const balanceResponse = await client.request({
+                    command: "account_info",
+                    account: account,
+                    ledger_index: "validated"
+                });
+                
+                // Convert drops to XRP (1 XRP = 1,000,000 drops)
+                const balance = balanceResponse.result.account_data.Balance / 1000000;
+                document.getElementById("accountAddress").innerText = account;
+                document.getElementById("accountBalance").innerText = balance;
+                await getTransactions(account);
+            } catch (error) {
+                console.error("Balance error:", error);
+                document.getElementById("accountAddress").innerText = account;
+                document.getElementById("accountBalance").innerText = "Error";
+                document.getElementById("txList").innerHTML = "Error fetching balance";
+            }
+        }
+
+        async function getTransactions(account) {
+            try {
+                const txResponse = await client.request({
+                    command: "account_tx",
+                    account: account,
+                    limit: 5
+                });
+                
+                const transactions = txResponse.result.transactions;
+                let txListHtml = "";
+                
+                transactions.forEach(tx => {
+                    const txType = tx.tx.TransactionType;
+                    const amount = tx.tx.Amount ? 
+                        (typeof tx.tx.Amount === 'string' ? 
+                            `${(parseInt(tx.tx.Amount) / 1000000)} XRP` : 
+                            JSON.stringify(tx.tx.Amount)) : 
+                        "N/A";
+                    const txHash = tx.tx.hash;
+                    
+                    txListHtml += `
+                        <div class="transaction">
+                            <p><strong>Type:</strong> ${txType}</p>
+                            <p><strong>Amount:</strong> ${amount}</p>
+                            <p><strong>Hash:</strong> <a href="https://xrpscan.com/tx/${txHash}" target="_blank">${txHash}</a></p>
+                        </div>
+                    `;
+                });
+
+                document.getElementById("txList").innerHTML = txListHtml || "No recent transactions found.";
+            } catch (error) {
+                console.error("Transaction error:", error);
+                document.getElementById("txList").innerHTML = "Error fetching transactions";
+            }
+        }
+        
+        // Initialize the connection when the page loads
+        window.onload = connectXRPL;
+    </script>
+</body>
+</html>
